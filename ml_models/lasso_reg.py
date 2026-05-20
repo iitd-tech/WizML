@@ -1,4 +1,4 @@
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Lasso
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
@@ -12,23 +12,25 @@ from typing import List
 import pandas as pd
 import numpy as np
 
-def ran_for_reg(df: pd.DataFrame, features: List[str], target: List[str]):
+def lasso_reg(df: pd.DataFrame, features: List[str], target: List[str]):
     
     X = df[features]
     y = df[target]
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
-
+    scaler=StandardScaler()
+    X_train_scaled=scaler.fit_transform(X_train)
+    X_test_scaled= scaler.transform(X_test)
 
     # pca= PCA(n_components=1)
     # X_train_pca= pca.fit_transform(X_train_scaled)
     # X_test_pca=pca.fit(X_test_scaled)
 
-    model= RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+    model= Lasso(alpha=1.0)
+    model.fit(X_train_scaled, y_train)
 
-    y_pred=model.predict(X_test)
+    y_pred=model.predict(X_test_scaled)
 
     # residuals = y_test - y_pred
     
