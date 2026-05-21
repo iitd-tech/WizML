@@ -17,6 +17,7 @@ import math
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
+
 def welcome_page():
     st.set_page_config(page_title="WizML", layout="centered")
 
@@ -24,6 +25,9 @@ def welcome_page():
     st.markdown("""
     <style>
         #MainMenu, footer, header { visibility: hidden; }
+        [data-testid="stSidebarCollapsedControl"] { visibility: visible !important; }
+        
+                
         .stApp { background: #080810; }
         /* old theme */
         /* .stApp { background: #000000; } */
@@ -75,18 +79,47 @@ def welcome_page():
     
 
 def show_main_platform():
-
+    st.set_page_config(initial_sidebar_state="expanded")
     st.markdown("""
     <style>
         #MainMenu, footer, header { visibility: hidden; }
-        .stApp { background: #080810; color: #b4d4f0; }
+        [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+        [data-testid="stSidebarCollapseButton"] { display: none !important; }
+                
+        .stApp {background: #080810; color: #b4d4f0; }
         .stSidebar { background: #0a0e18; }
         section[data-testid="stSidebar"] * { color: #b4d4f0 !important; }
         .stSelectbox label { color: #47aaff !important; }
         .stSelectbox > div > div { background: #0d1520 !important; color: #b4d4f0 !important; border-color: #1a3550 !important; }
+        
         .stMultiSelect label { color: #47aaff !important; }
         .stMultiSelect > div > div { background: #0d1520 !important; color: #b4d4f0 !important; border-color: #1a3550 !important; }
+        /* force all multiselect inner elements */
+        [data-testid="stMultiSelect"] > div { background: #0d1520 !important; border-color: #1a3550 !important; }
+        [data-testid="stMultiSelect"] div { background: #0d1520 !important; }
+        [data-testid="stMultiSelect"] input { background: #0d1520 !important; color: #b4d4f0 !important; }
+        /* the outer container box */
+        [data-baseweb="select"] { background: #0d1520 !important; overflow: visible !important; }
+        [data-baseweb="select"] > div { background: #0d1520 !important; border-color: #1a3550 !important; border-radius: 6px !important; padding: 6px 8px !important; overflow: visible !important; min-height: 42px !important; }
+        [data-baseweb="select"] > div > div { overflow: visible !important; flex-wrap: wrap !important; padding: 0 0 !important; margin: 0 !important; align-items: center !important; }
+        [data-baseweb="tag"] { margin: 0 0 0 18px !important; }
+        [data-testid="stMultiSelect"] { overflow: visible !important; }
+        [data-testid="stMultiSelect"] > div { overflow: visible !important; }
+        [data-testid="stMultiSelect"] > div > div { overflow: visible !important; padding: 2px 4px !important; }
+        [data-testid="stMultiSelect"] > div > div > div { clip: unset !important; overflow: visible !important; padding: 0 !important; }
         
+        
+        /* selected tags */
+        [data-baseweb="tag"] { background: #1a3550 !important; color: #47aaff !important; border: none !important; border-radius: 4px !important; }
+        [data-baseweb="tag"] span { color: #47aaff !important; }
+        [data-baseweb="tag"] button { color: #47aaff !important; background: transparent !important; }
+        /* remove button inside tag */
+        [data-baseweb="tag"] [role="presentation"] { color: #47aaff !important; }
+        /* dropdown chevron and clear icons */
+        [data-testid="stMultiSelect"] svg { color: #47aaff !important; fill: #47aaff !important; }
+        /* the results metric table below */
+        [data-testid="stDataFrame"] { background: #0d1520 !important; border-color: #1a3550 !important; } 
+                
         .stExpander { border-color: #2a2a4a !important; background: #1a1a2e !important; }
         .stExpander summary { color: #7eb8f7 !important; }
         .stDataFrame { background: #1a1a2e !important; }
@@ -127,7 +160,10 @@ def show_main_platform():
     </style>
     """, unsafe_allow_html=True)
 
-    #old theme
+    
+
+   
+    # old theme
     # st.markdown("""
     # <style>
     #     #MainMenu, footer, header { visibility: hidden; }
@@ -321,6 +357,84 @@ def show_main_platform():
         st.dataframe(classification_dataframe)
         st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
     
+    if selected_features and selected_target:
+        if(model_select=='Logistic Regression'):
+            classification_report=logistic_regression(st.session_state.data, selected_features, selected_target)
+            classification_dataframe = pd.DataFrame(classification_report)
+            accuracy = classification_dataframe["accuracy"].unique()[0]
+            classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+            st.dataframe(classification_dataframe)
+            st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+        if(model_select=='Random Forest'):
+            classification_report= random_forest_classifier(st.session_state.data, selected_features, selected_target)
+            classification_dataframe = pd.DataFrame(classification_report)
+            accuracy = classification_dataframe["accuracy"].unique()[0]
+            classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+            st.dataframe(classification_dataframe)
+            st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+        if(model_select=='Support Vector Machine'):
+            classification_report= support_vector_machine(st.session_state.data, selected_features, selected_target)
+            classification_dataframe = pd.DataFrame(classification_report)
+            accuracy = classification_dataframe["accuracy"].unique()[0]
+            classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+            st.dataframe(classification_dataframe)
+            st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+        if(model_select=='Naive Bayes'):
+            classification_report= naive_bayes(st.session_state.data, selected_features, selected_target)
+            classification_dataframe = pd.DataFrame(classification_report)
+            accuracy = classification_dataframe["accuracy"].unique()[0]
+            classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+            st.dataframe(classification_dataframe)
+            st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+        
+        if(model_select=='K-Nearest Neighbors'):
+            classification_report= k_neighbor(st.session_state.data, selected_features, selected_target)
+            classification_dataframe = pd.DataFrame(classification_report)
+            accuracy = classification_dataframe["accuracy"].unique()[0]
+            classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+            st.dataframe(classification_dataframe)
+            st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+        if(model_select=='Decision Tree'):
+            classification_report= dec_tree(st.session_state.data, selected_features, selected_target)
+            classification_dataframe = pd.DataFrame(classification_report)
+            accuracy = classification_dataframe["accuracy"].unique()[0]
+            classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+            st.dataframe(classification_dataframe)
+            st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+        if(model_select=='Linear Regression'):
+            metrics= linear_regression(st.session_state.data, selected_features, selected_target)
+            st.dataframe(metrics)
+            
+
+        if(model_select=='Decision Tree Regression'):
+            metrics= dec_tree_reg(st.session_state.data, selected_features, selected_target)
+            st.dataframe(metrics)
+            
+
+        if(model_select=='Random Forest Regression'):
+            metrics= ran_for_reg(st.session_state.data, selected_features, selected_target)
+            st.dataframe(metrics)
+            
+
+        if(model_select=='Ridge Regression'):
+            metrics= ridge_reg(st.session_state.data, selected_features, selected_target)
+            st.dataframe(metrics)
+            
+
+        if(model_select=='Lasso Regression'):
+            metrics= lasso_reg(st.session_state.data, selected_features, selected_target)
+            st.dataframe(metrics)
+            
+    
+        if(model_select=='Support Vector Regression'):
+            metrics= svr(st.session_state.data, selected_features, selected_target)
+            st.dataframe(metrics)
+            
     if(model_select=='K-Nearest Neighbors'):
         classification_report= k_neighbor(st.session_state.data, selected_features, selected_target)
         classification_dataframe = pd.DataFrame(classification_report)
