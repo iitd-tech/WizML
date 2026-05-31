@@ -13,52 +13,33 @@ import pandas as pd
 import numpy as np
 
 def svr(df: pd.DataFrame, features: List[str], target: List[str]):
-    
+
     X = df[features]
     y = df[target]
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
-    scaler=StandardScaler()
-    X_train_scaled=scaler.fit_transform(X_train)
-    X_test_scaled= scaler.transform(X_test)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-    # pca= PCA(n_components=1)
-    # X_train_pca= pca.fit_transform(X_train_scaled)
-    # X_test_pca=pca.fit(X_test_scaled)
+    pca = PCA(n_components=2)
+    X_train_pca = pca.fit_transform(X_train_scaled)
+    X_test_pca = pca.transform(X_test_scaled)
 
-    model= SVR(kernel='rbf', C=100.0, epsilon=0.1)
+    model = SVR(kernel='rbf', C=100.0, epsilon=0.1)
     model.fit(X_train_scaled, y_train)
 
-    y_pred=model.predict(X_test_scaled)
+    y_pred = model.predict(X_test_scaled)
 
-    # residuals = y_test - y_pred
-    
-    # plt.figure(figsize=(8,5))
-    # plt.scatter(X_test_pca, y_test, label='Actual Values')
-    # plt.plot(X_test_pca, y_pred, linewidth=2, label='Regression Line')
+    y_test_flat = y_test.values.ravel() if hasattr(y_test, 'values') else y_test.ravel()
+    residuals = y_test_flat - y_pred
 
-    # plt.xlabel('Principal Component 1')
-    # plt.ylabel(target)
-    # plt.title('PCA + Linear Regression')
-    # plt.legend()
-    # plt.show()
+    z = np.polyfit(X_test_pca[:, 0], y_test_flat, 1)
+    p = np.poly1d(z)
+    bestfit_line = p(np.sort(X_test_pca[:, 0]))
 
-
-
-    # plt.figure(figsize=(8,5))
-
-    # plt.scatter(y_pred, residuals)
-    # plt.axhline(y=0, linestyle='--')
-
-    # plt.xlabel('Predicted Values')
-    # plt.ylabel('Residuals')
-    # plt.title('Residual Plot')
-
-    # plt.show()
-
-
-    metrics_df=pd.DataFrame({
+    metrics_df = pd.DataFrame({
         'Metrics':[
             'R2 Score',
             'MAE',
@@ -66,11 +47,21 @@ def svr(df: pd.DataFrame, features: List[str], target: List[str]):
             'RMSE'
         ],
         'Values':[
-            r2_score(y_test,y_pred),
+            r2_score(y_test, y_pred),
             mean_absolute_error(y_test, y_pred),
             mean_squared_error(y_test, y_pred),
             np.sqrt(mean_squared_error(y_test, y_pred))
         ]
     })
-    return metrics_df
+
+    pca_data = {
+        'X_test_pca': X_test_pca,
+        'y_test': y_test_flat,
+        'y_pred': y_pred,
+        'residuals': residuals,
+        'bestfit_line': bestfit_line,
+        'bestfit_x': np.sort(X_test_pca[:, 0])
+    }
+
+    return metrics_df, pca_data
 

@@ -24,8 +24,7 @@ def support_vector_machine(df: pd.DataFrame, selected_features: list[str], selec
 
     # Make predictions
     y_pred = model.predict(X_test_scaled)
-
+    y_pred_prob = model.decision_function(X_test_scaled)
     
-    report= classification_report(y_test, y_pred, output_dict=True)
+    return classification_report(y_test,y_pred, output_dict=True), y_pred_prob, y_test, y, y_pred
 
-    return report
