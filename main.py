@@ -1,6 +1,10 @@
 import streamlit as st 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import matplotlib as mpl
+from sklearn.decomposition import PCA
 from ucimlrepo import fetch_ucirepo
 from ml_models.log_reg import logistic_regression
 from ml_models.lin_reg import linear_regression
@@ -15,11 +19,29 @@ from ml_models.ridge_reg import ridge_reg
 from ml_models.lasso_reg import lasso_reg
 from ml_models.svr import svr
 import streamlit.components.v1 as components
+from sklearn.metrics import roc_curve, roc_auc_score, confusion_matrix
+from sklearn.preprocessing import label_binarize
+
 import os
 import math 
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+
+if "y_pred_prob" not in st.session_state:
+    st.session_state.y_pred_prob = None
+
+if "y_test" not in st.session_state:
+    st.session_state.y_test = None
+
+if "y" not in st.session_state:
+    st.session_state.y= None
+
+if "y_pred" not in st.session_state:
+    st.session_state.y_pred= None
+
+if "pca_data" not in st.session_state:
+    st.session_state.pca_data = None
 
 
 def welcome_page():
@@ -214,6 +236,8 @@ def show_main_platform():
 
     #==================================================
 
+    
+
     select_method=st.sidebar.selectbox(
         label = 'Select the type of algorithms',
         options = ('Regression', 'Classification'),
@@ -236,7 +260,7 @@ def show_main_platform():
     else:
         dataset_select=st.sidebar.selectbox(
             label = 'Select the dataset',
-            options = ('Air Quality', 'Wine Quality'),
+            options = ('Auto MPG', 'Concrete Compressive Strength'),
             index=None,
             placeholder="Select"
         )
@@ -332,6 +356,68 @@ def show_main_platform():
             # st.dataframe(st.session_state.data, hide_index=True,
             #              use_container_width=True)
 
+            dataset = st.session_state.last_dataset
+            if dataset == "Iris":
+                iris = fetch_ucirepo(id=53)
+                df = pd.DataFrame(data=iris.data.features)
+                df['target'] = iris.data.targets
+            elif dataset == "Heart Disease":
+                heart_disease = fetch_ucirepo(id=45)
+                df = pd.DataFrame(data=heart_disease.data.features)
+                df['target'] = heart_disease.data.targets
+            elif dataset == "Auto MPG":
+                auto_mpg = fetch_ucirepo(id=9)
+                df = pd.DataFrame(data=auto_mpg.data.features)
+                df['target'] = auto_mpg.data.targets
+            elif dataset == "Concrete Compressive Strength":
+                concrete = fetch_ucirepo(id=165)
+                df = pd.DataFrame(data=concrete.data.features)
+                df['target'] = concrete.data.targets
+
+            st.session_state.data = df
+            st.session_state.loading_dataset = False
+            st.rerun()
+
+        elif st.session_state.data is not None:
+            with st.expander(label="View Dataset", expanded=True):
+                styled_df = st.session_state.data.style.set_properties(**{
+                    'background-color': '#1a1a2e',
+                    'color': '#c8d8f0',
+                    'border-color': '#2a2a4a',
+                    'font-family': 'Courier New, monospace',
+                    'font-size': '13px'
+                }).set_table_styles([
+                    {'selector': 'thead th', 'props': [
+                        ('background-color', '#0f3460'),
+                        ('color', '#a8d8ff'),
+                        ('border-color', '#2a2a4a'),
+                        ('font-family', 'Courier New, monospace'),
+                        ('font-size', '13px'),
+                        ('padding', '8px'),
+                        ('font-weight', 'bold'),
+                        ('letter-spacing', '0.05em'),
+                    ]},
+                    {'selector': 'th.col_heading', 'props': [
+                        ('background-color', '#0f3460'),
+                        ('color', '#a8d8ff'),
+                        ('font-family', 'Courier New, monospace'),
+                        ('font-size', '13px'),
+                        ('padding', '8px'),
+                        ('font-weight', 'bold'),
+                    ]},
+                    {'selector': 'th.col_heading.level0', 'props': [
+                        ('background-color', '#0f3460'),
+                        ('color', '#a8d8ff'),
+                    ]},
+                    {'selector': 'tbody tr:hover td', 'props': [
+                        ('background-color', '#16213e'),
+                    ]},
+                    {'selector': 'td', 'props': [
+                        ('padding', '6px 10px'),
+                        ('border-color', '#2a2a4a'),
+                    ]},
+                ])
+                st.dataframe(styled_df, hide_index=True, use_container_width=True, height=200)
 
     
 
@@ -402,29 +488,134 @@ def show_main_platform():
             st.dataframe(metrics)
             
 
-        if(model_select=='Decision Tree Regression'):
-            metrics= dec_tree_reg(st.session_state.data, selected_features, selected_target)
-            st.dataframe(metrics)
-            
+                # st.dataframe(st.session_state.data, hide_index=True,
+                #              use_container_width=True)
 
-        if(model_select=='Random Forest Regression'):
-            metrics= ran_for_reg(st.session_state.data, selected_features, selected_target)
-            st.dataframe(metrics)
-            
 
-        if(model_select=='Ridge Regression'):
-            metrics= ridge_reg(st.session_state.data, selected_features, selected_target)
-            st.dataframe(metrics)
-            
+        
 
-        if(model_select=='Lasso Regression'):
-            metrics= lasso_reg(st.session_state.data, selected_features, selected_target)
-            st.dataframe(metrics)
+        if st.session_state.data is not None:
+            selected_features = st.multiselect(
+                "Select your features",
+                options=list(st.session_state.data.columns),
+            )
+            selected_target = st.multiselect(
+                "Select your target",
+                options=list(st.session_state.data.columns)
+            )
+        else:
+            selected_features = []
+            selected_target = []
+
+    with tab2:
+        if selected_features and selected_target:
+            if(model_select=='Logistic Regression'):
+                classification_report,  y_pred_prob, y_test, y, y_pred= logistic_regression(st.session_state.data, selected_features, selected_target)
+                st.session_state.y_test = y_test 
+                st.session_state.y_pred_prob = y_pred_prob
+                st.session_state.y=y
+                st.session_state.y_pred =y_pred
+                classification_dataframe = pd.DataFrame(classification_report)
+                accuracy = classification_dataframe["accuracy"].unique()[0]
+                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                st.dataframe(classification_dataframe)
+                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+            if(model_select=='Random Forest'):
+                classification_report,  y_pred_prob, y_test, y, y_pred= random_forest_classifier(st.session_state.data, selected_features, selected_target)
+                st.session_state.y_test = y_test 
+                st.session_state.y_pred_prob = y_pred_prob
+                st.session_state.y=y
+                st.session_state.y_pred=y_pred
+                classification_dataframe = pd.DataFrame(classification_report)
+                accuracy = classification_dataframe["accuracy"].unique()[0]
+                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                st.dataframe(classification_dataframe)
+                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+            if(model_select=='Support Vector Machine'):
+                classification_report,  y_pred_prob, y_test, y, y_pred= support_vector_machine(st.session_state.data, selected_features, selected_target)
+                st.session_state.y_test = y_test 
+                st.session_state.y_pred_prob = y_pred_prob
+                st.session_state.y=y
+                st.session_state.y_pred=y_pred
+                classification_dataframe = pd.DataFrame(classification_report)
+                accuracy = classification_dataframe["accuracy"].unique()[0]
+                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                st.dataframe(classification_dataframe)
+                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+            if(model_select=='Naive Bayes'):
+                classification_report,  y_pred_prob, y_test, y, y_pred= naive_bayes(st.session_state.data, selected_features, selected_target)
+                st.session_state.y_test = y_test 
+                st.session_state.y_pred_prob = y_pred_prob
+                st.session_state.y=y
+                st.session_state.y_pred=y_pred
+                classification_dataframe = pd.DataFrame(classification_report)
+                accuracy = classification_dataframe["accuracy"].unique()[0]
+                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                st.dataframe(classification_dataframe)
+                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
             
-    
-        if(model_select=='Support Vector Regression'):
-            metrics= svr(st.session_state.data, selected_features, selected_target)
-            st.dataframe(metrics)
+            if(model_select=='K-Nearest Neighbors'):
+                classification_report,  y_pred_prob, y_test, y, y_pred= k_neighbor(st.session_state.data, selected_features, selected_target)
+                st.session_state.y_test = y_test 
+                st.session_state.y_pred_prob = y_pred_prob
+                st.session_state.y=y
+                st.session_state.y_pred=y_pred
+                classification_dataframe = pd.DataFrame(classification_report)
+                accuracy = classification_dataframe["accuracy"].unique()[0]
+                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                st.dataframe(classification_dataframe)
+                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+            if(model_select=='Decision Tree'):
+                classification_report,  y_pred_prob, y_test, y, y_pred= dec_tree(st.session_state.data, selected_features, selected_target)
+                st.session_state.y_test = y_test 
+                st.session_state.y_pred_prob = y_pred_prob
+                st.session_state.y=y
+                st.session_state.y_pred=y_pred
+                classification_dataframe = pd.DataFrame(classification_report)
+                accuracy = classification_dataframe["accuracy"].unique()[0]
+                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                st.dataframe(classification_dataframe)
+                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+            if(model_select=='Linear Regression'):
+                metrics, pca_data= linear_regression(st.session_state.data, selected_features, selected_target)
+                st.session_state.pca_data = pca_data
+                st.dataframe(metrics)
+
+
+            if(model_select=='Decision Tree Regression'):
+                metrics, pca_data= dec_tree_reg(st.session_state.data, selected_features, selected_target)
+                st.session_state.pca_data = pca_data
+                st.dataframe(metrics)
+
+
+            if(model_select=='Random Forest Regression'):
+                metrics, pca_data= ran_for_reg(st.session_state.data, selected_features, selected_target)
+                st.session_state.pca_data = pca_data
+                st.dataframe(metrics)
+
+
+            if(model_select=='Ridge Regression'):
+                metrics, pca_data= ridge_reg(st.session_state.data, selected_features, selected_target)
+                st.session_state.pca_data = pca_data
+                st.dataframe(metrics)
+
+
+            if(model_select=='Lasso Regression'):
+                metrics, pca_data= lasso_reg(st.session_state.data, selected_features, selected_target)
+                st.session_state.pca_data = pca_data
+                st.dataframe(metrics)
+
+
+            if(model_select=='Support Vector Regression'):
+                metrics, pca_data= svr(st.session_state.data, selected_features, selected_target)
+                st.session_state.pca_data = pca_data
+                st.dataframe(metrics)
+                
             
         
 

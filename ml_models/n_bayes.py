@@ -12,4 +12,6 @@ def naive_bayes(df: pd.DataFrame, features: List[str], target: List[str]):
     model= GaussianNB()
     model.fit(X_train, y_train)
     y_pred=model.predict(X_test)
-    return classification_report(y_test,y_pred, output_dict=True)
+    y_pred_prob = model.predict_proba(X_test)
+    
+    return classification_report(y_test,y_pred, output_dict=True), y_pred_prob, y_test, y, y_pred

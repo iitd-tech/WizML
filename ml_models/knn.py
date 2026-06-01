@@ -15,6 +15,7 @@ def k_neighbor(df: pd.DataFrame, features: List[str], target: List[str]):
     model=KNeighborsClassifier(n_neighbors=5)
     model.fit(X_train_scaled, y_train)
     y_pred=model.predict(X_test_scaled)
-    return classification_report(y_test,y_pred, output_dict=True)
-
+    y_pred_prob = model.predict_proba(X_test_scaled)
+    
+    return classification_report(y_test,y_pred, output_dict=True), y_pred_prob, y_test, y, y_pred
 
