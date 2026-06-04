@@ -1,0 +1,17 @@
+[theme]
+ 
+# ── Base colors ────────────────────────────────────────────────────────────────
+# Main app background (#080810 from .stApp)
+backgroundColor = "#080810"
+ 
+# Sidebar / secondary surface (#0a0e18 from .stSidebar)
+secondaryBackgroundColor = "#0a0e18"
+ 
+# Body text (#b4d4f0 from general color declarations)
+textColor = "#b4d4f0"
+ 
+# Accent / interactive elements (#47aaff from labels, icons, borders)
+primaryColor = "#47aaff"
+ 
+# ── Font ───────────────────────────────────────────────────────────────────────
+font = "sans serif"
