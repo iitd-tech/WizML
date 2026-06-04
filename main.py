@@ -758,6 +758,127 @@ def show_main_platform():
                     else:
                         st.markdown("<span style='color:#2a4a6a; font-family:Courier New;'>Run a regression model to see residual plot.</span>", unsafe_allow_html=True)
 
+    with tab4:
+        if(model_select=="Linear Regression"):
+            st.subheader(':blue[Linear Regression]')
+            st.markdown("Linear Regression is a fundamental supervised learning algorithm used to model the relationship between a dependent variable and one or more independent variables. It predicts continuous values by fitting a straight line that best represents the data.")
+            st.markdown("###### :blue[Equation of the Best-Fit Line:]")
+            st.markdown("For simple linear regression (with one independent variable), the best-fit line is represented by the equation.")
+            
+            st.markdown("##### $$y = mx + c$$", text_alignment="center", )
+            st.markdown('''
+                        Where: 
+                        - y is the predicted value (dependent variable) 
+                        - x is the input (independent variable) 
+                        - m is the slope of the line (how much y changes when x changes) 
+                        - c is the intercept (the value of y when x = 0)
+                        ''')
+
+        if(model_select=="Ridge Regression"):
+            st.subheader(':blue[Ridge Regression]')
+            st.markdown("Ridge Regression is a version of linear regression that adds an L2 penalty to control large coefficient values. \
+                        While Linear Regression only minimizes prediction error, it can become unstable when features are highly correlated. \
+                        Ridge solves this by shrinking coefficients making the model more stable and reducing overfitting. ")
+            st.markdown("###### :blue[L2-Regularized Objective Function]")
+            st.markdown("###### $$\sum_{i=1}^{n} (y_i - \hat{y}_i)^2 + \lambda \sum_{j=1}^{p} w_j^2 $$", text_alignment="center")
+            st.markdown(''' 
+                        - First term measures prediction error 
+                        - Second term penalizes squared coefficient values 
+                        - λ determines how strongly coefficients are constrained toward zero (without making them exactly zero)
+                        ''')
+        if(model_select=="Lasso Regression"):
+            st.subheader(':blue[Lasso Regression]')
+            st.markdown("Lasso Regression (Least Absolute Shrinkage and Selection Operator) is a linear regression technique with L1 regularization that improves model generalization by adding a penalty. This penalty not only controls overfitting but also performs automatic feature selection by shrinking some coefficients exactly to zero, which is useful for high-dimensional datasets.")
+            st.markdown("###### :blue[L1-Regularized Objective Function]")
+            st.markdown("###### $$\sum_{i=1}^{n} (y_i - \hat{y}_i)^2 + \lambda \sum_{j=1}^{p} |w_j|$$", text_alignment="center")
+            st.markdown('''
+                        - First term measures prediction error
+                        - Second term penalizes absolute coefficient values
+                        - λ determines how strongly coefficients are constrained
+                        ''')
+            
+        if(model_select=="Decision Tree"):
+            st.subheader(':blue[Decision Tree Classifier]')
+            st.markdown("Decision Tree Algorithms are widely used supervised machine learning methods for both classification and regression tasks.  \
+                        They split data based on feature values to create a tree-like structure of decisions, starting from a root node and \
+                        ending at leaf nodes that provide predictions.\n\n :blue[Decision Tree Classifier] is a supervised machine learning algorithm that categorizes data by recursively splitting it based on feature-driven decision rules. \
+                        Each internal node represents a condition on a feature, branches denote the outcomes of those conditions and leaf nodes assign the final class label.")
+
+        if(model_select=='Logistic Regression'):
+            st.subheader(':blue[Logistic Regression]')
+            st.markdown("Logistic Regression is a supervised machine learning algorithm used for classification problems. \
+                        Unlike linear regression, which predicts continuous values it predicts the probability that an input belongs to a specific class.\n\n It\
+                        is used for binary classification where sigmoid function is used to convert inputs into a probability value between 0 and 1.")
+            st.markdown(r'''
+                        ##### $$ z = wx + b $$ 
+                        ##### $$p(z) = \frac{1}{1 + e^{-z}}$$
+                        ''', text_alignment="center")
+            st.markdown('''
+                        where:
+                        - w represents the weights assigned to each input feature
+                        - x is the input feature or observation
+                        - b is the bias term
+                        - p(z) represents the predicted probability 
+                        ''')
+            
+        if(model_select=='Decision Tree Regression'):
+            st.subheader(":blue[Decision Tree Regressor]")
+            st.markdown("Decision Tree Regressor \
+                        is used to predict continuous values such as prices or scores using a tree-like structure. \
+                        It splits the data into smaller groups based on simple rules derived from input features, helping reduce prediction errors. \
+                        At the end of each branch, called a leaf node, the model outputs a value, i.e., usually the average of that group.")
+
+        if(model_select=='Support Vector Regression'):
+            st.subheader(":blue[Support Vector Regressor]")
+            st.markdown('''
+                        Support Vector Regression predicts continuous values by fitting a function within a defined error margin. It uses kernel functions to handle both linear relationships and complex non-linear patterns in data.
+
+                        - Works well with high-dimensional data
+                        - Uses linear and kernel-based transformations
+                        - Controls model flexibility using regularization parameters
+                        - Effective for real-world datasets with limited samples
+                        ''')
+
+        if(model_select=='Random Forest Regression'):
+            st.subheader(":blue[Random Forest Regressor]")
+            st.markdown("Random Forest Regression works using the bagging (Bootstrap Aggregating) technique. \
+                        Multiple decision trees are trained on different random subsets of the dataset with replacement to train each tree. \
+                        Each tree uses a random subset of features while splitting nodes. \
+                        The final prediction is obtained by averaging the predictions from all decision trees.")  
+
+        if(model_select=='Random Forest'):
+            st.subheader(":blue[Random Forest Classifier]")
+            st.markdown("Random Forest Classifier is widely used for classification tasks because it handles large datasets and handles nonlinear relationships well. \
+                        It uses Bootstrap Sampling technique where Random rows are picked to train each tree. rees split the data using the best feature from their \
+                        random set. Splitting continues until a stopping rule is met (like max depth) \
+                        The final prediction is the one most tree agree on.")
+            
+        if(model_select=='Support Vector Machine'):
+            st.subheader(":blue[Support Vector Machine]")
+            st.markdown("Support Vector Machine (SVM) is a supervised machine learning algorithm used for classification and regression tasks.\
+                         It tries to find the best boundary known as hyperplane that separates different classes in the data. \
+                        It is useful when you want to do binary classification like spam vs. not spam or cat vs. dog.\n\n The \
+                        The main goal of SVM is to maximize the margin between the two classes.\
+                         The larger the margin the better the model performs on new and unseen data.")
+
+        if(model_select=='K-Nearest Neighbors'):
+            st.subheader(":blue[K-Nearest Neighbors]")
+            st.markdown('''
+                        K‑Nearest Neighbor (KNN) is a simple and widely used machine learning technique for classification and regression tasks. \
+                        It works by identifying the K closest data points to a given input and making predictions based on the majority class or average value of those neighbors.
+
+                        - Classifies data based on similarity with nearby data points
+                        - Uses distance metrics like Euclidean distance to find nearest neighbors
+                        - Since KNN makes no assumptions about the underlying data distribution, \
+                        it makes it a non-parametric and instance-based learning method.
+                        ''')
+
+        if(model_select=='Naive Bayes'):
+            st.subheader(":blue[Naive Bayes]")
+            st.markdown("Naive Bayes is a machine learning classification algorithm that predicts the category of a data point using probability. \
+                        It assumes that all features are independent of each other. \
+                        Naive Bayes performs well in many real-world applications \
+                        such as spam filtering, document categorisation and sentiment analysis.")
 
 if st.session_state.logged_in:
     show_main_platform()
