@@ -48,6 +48,64 @@ if "pca_data" not in st.session_state:
 if "my_tabs" not in st.session_state:
     st.session_state.my_tabs = "Dataset"
 
+if "uploaded_df" not in st.session_state:
+    st.session_state.uploaded_df = None
+
+if "upload_detected" not in st.session_state:
+    st.session_state.upload_detected = None
+
+if "last_upload_name" not in st.session_state:
+    st.session_state.last_upload_name = None
+
+def _detect_task(df: pd.DataFrame) -> str:
+    col = df["target"] if "target" in df.columns else df.iloc[:, -1]
+    if isinstance(col, pd.DataFrame):
+        col = col.iloc[:, 0]
+    col = col.dropna()
+    if not pd.api.types.is_numeric_dtype(col):
+        return "Discrete"
+    if pd.api.types.is_float_dtype(col):
+        return "Continuous"
+    if col.nunique() <= 20:
+        return "Discrete"
+    return "Continuous"
+
+
+
+from upstash_redis import Redis
+
+def get_redis():
+    return Redis(
+        url=st.secrets["UPSTASH_REDIS_REST_URL"],
+        token=st.secrets["UPSTASH_REDIS_REST_TOKEN"],
+    )
+
+def increment_visitor_count():
+    r = get_redis()
+    is_dev = st.secrets.get("DEV_MODE", False)
+    if not is_dev:
+        return r.incr("wizml_visitor_count")
+    return int(r.get("wizml_visitor_count") or 0)
+
+def get_visitor_count():
+    r = get_redis()
+    count = r.get("wizml_visitor_count")
+    return int(count) if count else 0
+
+def ordinal(n):
+    if 11 <= (n % 100) <= 13:
+        suffix = "th"
+    elif n % 10 == 1:
+        suffix = "st"
+    elif n % 10 == 2:
+        suffix = "nd"
+    elif n % 10 == 3:
+        suffix = "rd"
+    else:
+        suffix = "th"
+    return f"{n}{suffix}"
+
+
 def welcome_page():
     st.set_page_config(page_title="WizML", layout="centered")
 
@@ -98,14 +156,27 @@ def welcome_page():
     """, unsafe_allow_html=True)
 
     if st.button("Enter Platform", key="enter_btn"):
+        increment_visitor_count()
         st.session_state.logged_in = True
         st.rerun()
 
     
     BASE_DIR = os.path.dirname(__file__)
     html_path = os.path.join(BASE_DIR, "html_pages/wlcm.html")
+    count = get_visitor_count()+1
+    visitor_text = f"👾 you are the <b>{ordinal(count)}</b> visitor"
+
     with open(html_path, "r") as f:
         html_content = f.read()
+
+    # inject visitor text into the HTML before the closing body tag
+    html_content = html_content.replace(
+        "</body>",
+        f"""<p style='text-align:center; color:#47aaff; font-family:Courier New;
+            font-size:13px; letter-spacing:0.08em; margin-top:8px;'>
+            {visitor_text}</p>
+        </body>"""
+    )
 
     components.html(html_content, height=600, scrolling=False)
     
@@ -294,39 +365,142 @@ def show_main_platform():
 
     
 
-    select_method=st.sidebar.selectbox(
-        label = 'Select the type of algorithms',
-        options = ('Regression', 'Classification'),
-        index=None,
-        placeholder="Select"
+    # ── derive flags ──────────────────────────────────────────────────────────
+    has_upload = st.session_state.uploaded_df is not None
+    # has_preset is defined AFTER the container, once dataset_select exists
+
+    
+    select_method = st.sidebar.selectbox(
+        label       = 'Select the type of algorithms',
+        options     = ('Regression', 'Classification'),
+        index       = None,
+        placeholder = "Select",
+        disabled    = has_upload,
+        key         = "select_method_widget",
     )
-    if(select_method=='Classification'):
-        dataset_select=st.sidebar.selectbox(
-            label = 'Select the dataset',
-            options = ('Iris', 'Heart Disease'),
-            index=None,
-            placeholder="Select"
-        )
-        model_select=st.sidebar.selectbox(
-            label = 'Select the algorithm',
-            options = ('Logistic Regression','Random Forest','Decision Tree', 'Support Vector Machine', 'Naive Bayes' ,'K-Nearest Neighbors'),
-            index=None,
-            placeholder="Select"
-        )
+
+    if select_method == 'Classification':
+        preset_ds_opts = ('Iris', 'Heart Disease')
+    elif select_method == 'Regression':
+        preset_ds_opts = ('Auto MPG', 'Concrete Compressive Strength')
     else:
-        dataset_select=st.sidebar.selectbox(
-            label = 'Select the dataset',
-            options = ('Auto MPG', 'Concrete Compressive Strength'),
-            index=None,
-            placeholder="Select"
+        preset_ds_opts = ('Iris', 'Heart Disease', 'Auto MPG', 'Concrete Compressive Strength')
+
+    dataset_select = st.sidebar.selectbox(
+        label       = 'Select the dataset',
+        options     = preset_ds_opts,
+        index       = None,
+        placeholder = "Select",
+        disabled    = has_upload,
+        key         = "dataset_select_widget"
+    )
+
+    has_preset = (
+        dataset_select is not None
+        and st.session_state.data is not None
+        and not has_upload
+    )
+
+    # ── OR divider ────────────────────────────────────────────────────────────
+    st.sidebar.markdown("""
+    <div style='display:flex;align-items:center;margin:10px 4px;
+        color:#47aaff;font-family:Courier New;font-size:13px;'>
+        <div style='flex:1;height:1px;background:#1a3550;'></div>
+        <span style='margin:0 10px;'>OR</span>
+        <div style='flex:1;height:1px;background:#1a3550;'></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── file uploader ─────────────────────────────────────────────────────────
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload dataset (CSV or Excel)",
+        type     = ["csv","xlsx"],
+        disabled = has_preset,
+        help     = "To upload a dataset, first remove the selected dataset above.",
+    )
+
+    if has_preset:
+        st.sidebar.markdown(
+            "<div style='margin-top:-8px; padding:5px 10px; border-radius:5px;"
+            "border:1px solid #2a2a4a; background:#0a0e18;"
+            "color:#4a6a8a; font-family:Courier New; font-size:11px;'>"
+            "Remove selected dataset above to enable upload."
+            "</div>",
+            unsafe_allow_html=True,
         )
 
-        model_select=st.sidebar.selectbox(
-            label = 'Select the algorithm',
-            options = ('Linear Regression','Ridge Regression', 'Lasso Regression', 'Decision Tree Regression', 'Support Vector Regression', 'Random Forest Regression'),
-            index=None,
-            placeholder="Select"
-        )
+    if uploaded_file is not None:
+        if uploaded_file.name != st.session_state.last_upload_name:
+
+            file_ext = uploaded_file.name.split(".")[-1].lower()
+
+            if file_ext == "csv":
+                raw_df = pd.read_csv(uploaded_file)
+            elif file_ext == "xlsx":
+                raw_df = pd.read_excel(uploaded_file)
+
+            raw_df = clean_dataset(raw_df)
+            if "target" not in raw_df.columns:
+                raw_df = raw_df.rename(columns={raw_df.columns[-1]: "target"})
+            detected = _detect_task(raw_df)
+            st.session_state.uploaded_df      = raw_df
+            st.session_state.upload_detected  = detected
+            st.session_state.last_upload_name = uploaded_file.name
+            st.session_state.data             = raw_df
+            st.rerun()
+    elif st.session_state.uploaded_df is not None:
+        # file removed — reset
+        st.session_state.uploaded_df      = None
+        st.session_state.upload_detected  = None
+        st.session_state.last_upload_name = None
+        st.session_state.data             = None
+        st.rerun()
+
+    # re-read flag after potential rerun
+    has_upload = st.session_state.uploaded_df is not None
+
+    # ── detection badge ───────────────────────────────────────────────────────
+    if has_upload and st.session_state.upload_detected:
+        detected    = st.session_state.upload_detected
+        badge_color = "#44dd88" if detected == "Continuous" else "#ff6b6b"
+        badge_icon  = "📈" if detected == "Continuous" else "🔢"
+        st.sidebar.markdown(f"""
+        <div style='margin:6px 0 4px 0;padding:8px 12px;border-radius:6px;
+            border:1px solid {badge_color};background:#0a0e18;
+            color:{badge_color};font-family:Courier New;font-size:12px;'>
+            {badge_icon}&nbsp;<b>{detected} target detected</b><br>
+            <span style='color:#b4d4f0;font-size:11px;'>
+                Showing {'regression' if detected == 'Continuous' else 'classification'} algorithms
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── algorithm selector ────────────────────────────────────────────────────
+    if has_upload:
+        detected = st.session_state.upload_detected
+        if detected == "Continuous":
+            algo_options  = ('Linear Regression','Ridge Regression','Lasso Regression','Decision Tree Regression','Support Vector Regression','Random Forest Regression')
+            select_method = "Regression"
+        else:
+            algo_options  = ('Logistic Regression','Random Forest','Decision Tree','Support Vector Machine','Naive Bayes','K-Nearest Neighbors')
+            select_method = "Classification"
+    else:
+        if select_method == 'Classification':
+            algo_options = ('Logistic Regression','Random Forest','Decision Tree','Support Vector Machine','Naive Bayes','K-Nearest Neighbors')
+        elif select_method == 'Regression':
+            algo_options = ('Linear Regression','Ridge Regression','Lasso Regression','Decision Tree Regression','Support Vector Regression','Random Forest Regression')
+        else:
+            algo_options = ()
+
+    model_select = st.sidebar.selectbox(
+        label       = 'Select the algorithm',
+        options     = algo_options if algo_options else ['—'],
+        index       = None,
+        placeholder = "Select",
+        disabled    = not algo_options,
+    )
+    if model_select == '—':
+        model_select = None
 
     def switch_to_tab(tab_name):
         st.session_state.my_tabs = tab_name
@@ -386,12 +560,9 @@ def show_main_platform():
             hide_index=True
         )
 
-    tab1, tab2, tab3 , tab4, tab5= st.tabs(["Dataset", "EDA", "Model results","Visualisation","Description"], key="my_tabs", on_change="rerun")
-
+    tab1, tab2, tab2b, tab3, tab4, tab5 = st.tabs(["Dataset", "EDA", "Data Cleaning", "Model results", "Visualisation", "Description"], key="my_tabs", on_change="rerun")
+    
     with tab1:
-        
-        
-
         if dataset_select is not None:
             if st.session_state.get("last_dataset") != dataset_select:
                 st.session_state.loading_dataset = True
@@ -430,6 +601,14 @@ def show_main_platform():
             st.rerun()
 
         elif st.session_state.data is not None:
+            if has_upload:
+                st.markdown(
+                    f"<div style='margin-bottom:8px;padding:5px 10px;border-radius:5px;"
+                    f"border:1px solid #1a3550;background:#0a0e18;display:inline-block;"
+                    f"color:#47aaff;font-family:Courier New;font-size:12px;'>"
+                    f"📂 &nbsp;<b>{st.session_state.last_upload_name}</b></div>",
+                    unsafe_allow_html=True,
+                )
             with st.expander(label="View Dataset", expanded=True):
                 styled_df = st.session_state.data.style.set_properties(**{
                     'background-color': '#1a1a2e',
@@ -478,8 +657,6 @@ def show_main_platform():
                 #              use_container_width=True)
 
 
-        
-
         if st.session_state.data is not None:
             selected_features = st.multiselect(
                 "Select your features",
@@ -488,14 +665,20 @@ def show_main_platform():
             selected_target = ['target'] if 'target' in st.session_state.data.columns else []
         else:
             selected_features = []
-            selected_target = []
+            selected_target   = []
+
+        needs_cleaning = (
+            st.session_state.data is not None and (
+                st.session_state.data.isnull().sum().sum() > 0 or
+                st.session_state.data.select_dtypes(exclude=np.number).drop(columns=["target"], errors="ignore").shape[1] > 0
+            )
+        )
 
         flag = not (
-            selected_features is not None and
-            model_select is not None and
             len(selected_features) > 0 and
+            model_select is not None and
             len(model_select) > 0
-        )
+        ) or needs_cleaning
 
         left_space, center_button, right_space = st.columns([3, 2, 3])
 
@@ -505,7 +688,33 @@ def show_main_platform():
                 on_click=switch_to_tab,
                 args=("Model results",),
                 disabled=flag,
-                use_container_width=True
+                use_container_width=True,
+            )
+
+        if needs_cleaning:
+            st.markdown(
+                "<div style='margin-top:10px; padding:8px 14px; border-radius:6px;"
+                "border:1px solid #ff6b6b; background:#0a0e18; text-align:center;'>"
+                "<p style='color:#ff6b6b; font-family:Courier New; font-size:12px; margin:0;'>"
+                "⚠️ Dataset requires cleaning before training. "
+                "Head to the <b>Data Cleaning</b> tab first."
+                "</p></div>",
+                unsafe_allow_html=True,
+            )
+        if st.session_state.data is not None and not needs_cleaning and (not selected_features or model_select is None):
+            missing_parts = []
+            if model_select is None:
+                missing_parts.append("an algorithm")
+            if not selected_features:
+                missing_parts.append("features")
+            message = " and ".join(missing_parts)
+            st.markdown(
+                f"<div style='margin-top:10px; padding:8px 14px; border-radius:6px;"
+                f"border:1px solid #2a4a6a; background:#0a0e18; text-align:center;'>"
+                f"<p style='color:#4a8aaa; font-family:Courier New; font-size:12px; margin:0;'>"
+                f"Please select {message} to continue."
+                f"</p></div>",
+                unsafe_allow_html=True,
             )
 
     with tab2:
@@ -1020,119 +1229,428 @@ def show_main_platform():
 
                 st.pyplot(fig)
             
-        
+    with tab2b:
+        if st.session_state.data is None:
+            st.warning("Please load a dataset first.")
+        else:
+            df = st.session_state.data.copy()
+
+            BG     = "#080810"
+            SIDEBAR= "#0a0e18"
+            TEXT   = "#b4d4f0"
+            ACCENT = "#47aaff"
+
+            num_cols  = df.select_dtypes(include=np.number).columns.tolist()
+            cat_cols  = df.select_dtypes(exclude=np.number).columns.tolist()
+            # exclude target from cleaning scope display but keep it in df
+            feat_num  = [c for c in num_cols if c != "target"]
+            feat_cat  = [c for c in cat_cols if c != "target"]
+
+            missing_total  = df.isnull().sum().sum()
+            duplicate_total= df.duplicated().sum()
+            constant_cols  = [c for c in df.columns if df[c].nunique() <= 1]
+            high_card_cols = [c for c in feat_cat if df[c].nunique() > 20]
+            neg_cols       = [c for c in feat_num if (df[c] < 0).any()]
+
+            # ── Dataset Health ────────────────────────────────────────────────
+            st.markdown(
+                "<p style='color:#47aaff; font-family:Courier New; font-size:15px;"
+                "font-weight:bold; letter-spacing:0.08em; margin-bottom:6px;'>"
+                "DATASET HEALTH</p>",
+                unsafe_allow_html=True,
+            )
+
+            health_items = [
+                ("Missing Values",       missing_total,           missing_total > 0),
+                ("Duplicate Rows",       duplicate_total,         duplicate_total > 0),
+                ("Numerical Columns",    len(feat_num),           False),
+                ("Categorical Columns",  len(feat_cat),           False),
+                ("Constant Columns",     len(constant_cols),      len(constant_cols) > 0),
+                ("High Cardinality Cols",len(high_card_cols),     len(high_card_cols) > 0),
+                ("Columns w/ Negatives", len(neg_cols),           False),
+            ]
+
+            rows_html = ""
+            for label, value, warn in health_items:
+                color = "#ff6b6b" if warn else TEXT
+                rows_html += (
+                    f"<tr>"
+                    f"<td style='padding:5px 16px; color:{color}; font-family:Courier New; font-size:13px;'>{label}</td>"
+                    f"<td style='padding:5px 16px; color:{color}; font-family:Courier New; font-size:13px; font-weight:bold;'>: {value}</td>"
+                    f"</tr>"
+                )
+
+            st.markdown(
+                f"<table style='border:1px solid #1a3550; border-radius:6px; "
+                f"background:#0a0e18; width:100%; border-collapse:collapse;'>"
+                f"{rows_html}</table>",
+                unsafe_allow_html=True,
+            )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Cleaning Actions ──────────────────────────────────────────────
+            st.markdown(
+                "<p style='color:#47aaff; font-family:Courier New; font-size:15px;"
+                "font-weight:bold; letter-spacing:0.08em; margin-bottom:6px;'>"
+                "CLEANING ACTIONS</p>",
+                unsafe_allow_html=True,
+            )
+
+            with st.container(border=True):
+                do_duplicates = st.checkbox("Remove Duplicate Rows", value=duplicate_total > 0)
+
+            with st.container(border=True):
+                do_missing = st.checkbox("Handle Missing Values", value=missing_total > 0)
+                if do_missing:
+                    missing_strategy = st.radio(
+                        "Strategy",
+                        options=["Mean", "Median", "Mode", "Drop Rows with Missing"],
+                        horizontal=True,
+                        label_visibility="collapsed",
+                    )
+                else:
+                    missing_strategy = "Mean"
+
+            with st.container(border=True):
+                do_encode = st.checkbox(
+                    "Encode Categorical Features",
+                    value=len(feat_cat) > 0,
+                    disabled=len(feat_cat) == 0,
+                )
+                if do_encode and feat_cat:
+                    encode_strategy = st.radio(
+                        "Encoding",
+                        options=["Label Encoding", "One-Hot Encoding"],
+                        horizontal=True,
+                        label_visibility="collapsed",
+                    )
+                else:
+                    encode_strategy = "Label Encoding"
+
+            with st.container(border=True):
+                do_outliers = st.checkbox("Remove Outliers (IQR method)", value=False)
+                if do_outliers:
+                    outlier_cols = st.multiselect(
+                        "Apply to columns (leave empty = all numeric)",
+                        options=feat_num,
+                    )
+
+            with st.container(border=True):
+                do_scale = st.checkbox("Scale Numerical Features", value=False)
+                if do_scale:
+                    scale_strategy = st.radio(
+                        "Scaler",
+                        options=["StandardScaler", "MinMaxScaler", "RobustScaler"],
+                        horizontal=True,
+                        label_visibility="collapsed",
+                    )
+                else:
+                    scale_strategy = "StandardScaler"
+
+            with st.container(border=True):
+                do_constant = st.checkbox(
+                    "Drop Constant Columns",
+                    value=len(constant_cols) > 0,
+                    disabled=len(constant_cols) == 0,
+                )
+
+            with st.container(border=True):
+                do_highcard = st.checkbox(
+                    "Drop High Cardinality Columns (> 20 unique)",
+                    value=False,
+                    disabled=len(high_card_cols) == 0,
+                )
+
+            with st.container(border=True):
+                do_dtype_fix = st.checkbox(
+                    "Fix Mixed / Object Columns (coerce to numeric where possible)",
+                    value=False,
+                )
+
+            with st.container(border=True):
+                do_whitespace = st.checkbox(
+                    "Strip Whitespace from String Columns",
+                    value=len(feat_cat) > 0,
+                    disabled=len(feat_cat) == 0,
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Apply Button ──────────────────────────────────────────────────
+            _, center, _ = st.columns([3, 2, 3])
+            with center:
+                apply = st.button("Apply Cleaning", use_container_width=True)
+
+            if apply:
+                from sklearn.preprocessing import LabelEncoder, StandardScaler, MinMaxScaler, RobustScaler
+
+                original_shape = df.shape
+                df_clean = df.copy()
+
+                # 1. strip whitespace
+                if do_whitespace:
+                    for c in feat_cat:
+                        if c in df_clean.columns:
+                            df_clean[c] = df_clean[c].astype(str).str.strip()
+
+                # 2. fix mixed/object columns
+                if do_dtype_fix:
+                    for c in df_clean.columns:
+                        if df_clean[c].dtype == object:
+                            converted = pd.to_numeric(df_clean[c], errors='coerce')
+                            if converted.notna().sum() > df_clean[c].notna().sum() * 0.5:
+                                df_clean[c] = converted
+
+                # 3. constant columns
+                if do_constant:
+                    cols_to_drop = [c for c in constant_cols if c != "target"]
+                    df_clean.drop(columns=cols_to_drop, inplace=True, errors='ignore')
+
+                # 4. high cardinality
+                if do_highcard:
+                    cols_to_drop = [c for c in high_card_cols if c != "target"]
+                    df_clean.drop(columns=cols_to_drop, inplace=True, errors='ignore')
+
+                # 5. duplicates
+                if do_duplicates:
+                    df_clean.drop_duplicates(inplace=True)
+
+                # 6. missing values
+                if do_missing:
+                    num_cols_now = [c for c in df_clean.select_dtypes(include=np.number).columns if c != "target"]
+                    cat_cols_now = [c for c in df_clean.select_dtypes(exclude=np.number).columns if c != "target"]
+                    if missing_strategy == "Drop Rows with Missing":
+                        df_clean.dropna(inplace=True)
+                    elif missing_strategy == "Mean":
+                        df_clean[num_cols_now] = df_clean[num_cols_now].fillna(df_clean[num_cols_now].mean())
+                        for c in cat_cols_now:
+                            df_clean[c].fillna(df_clean[c].mode()[0] if not df_clean[c].mode().empty else "Unknown", inplace=True)
+                    elif missing_strategy == "Median":
+                        df_clean[num_cols_now] = df_clean[num_cols_now].fillna(df_clean[num_cols_now].median())
+                        for c in cat_cols_now:
+                            df_clean[c].fillna(df_clean[c].mode()[0] if not df_clean[c].mode().empty else "Unknown", inplace=True)
+                    elif missing_strategy == "Mode":
+                        for c in num_cols_now + cat_cols_now:
+                            df_clean[c].fillna(df_clean[c].mode()[0] if not df_clean[c].mode().empty else 0, inplace=True)
+
+                # 7. encode categoricals
+                if do_encode:
+                    cat_cols_now = [c for c in df_clean.select_dtypes(exclude=np.number).columns if c != "target"]
+                    if encode_strategy == "Label Encoding":
+                        le = LabelEncoder()
+                        for c in cat_cols_now:
+                            df_clean[c] = le.fit_transform(df_clean[c].astype(str))
+                    elif encode_strategy == "One-Hot Encoding":
+                        df_clean = pd.get_dummies(df_clean, columns=cat_cols_now)
+                        # make sure target stays last
+                        if "target" in df_clean.columns:
+                            cols = [c for c in df_clean.columns if c != "target"] + ["target"]
+                            df_clean = df_clean[cols]
+
+                # 8. outliers
+                if do_outliers:
+                    cols_for_outliers = outlier_cols if outlier_cols else [c for c in df_clean.select_dtypes(include=np.number).columns if c != "target"]
+                    for c in cols_for_outliers:
+                        if c in df_clean.columns:
+                            Q1  = df_clean[c].quantile(0.25)
+                            Q3  = df_clean[c].quantile(0.75)
+                            IQR = Q3 - Q1
+                            df_clean = df_clean[
+                                (df_clean[c] >= Q1 - 1.5 * IQR) &
+                                (df_clean[c] <= Q3 + 1.5 * IQR)
+                            ]
+
+                # 9. scaling
+                if do_scale:
+                    num_cols_now = [c for c in df_clean.select_dtypes(include=np.number).columns if c != "target"]
+                    if scale_strategy == "StandardScaler":
+                        scaler = StandardScaler()
+                    elif scale_strategy == "MinMaxScaler":
+                        scaler = MinMaxScaler()
+                    else:
+                        scaler = RobustScaler()
+                    df_clean[num_cols_now] = scaler.fit_transform(df_clean[num_cols_now])
+
+                # ── save back ─────────────────────────────────────────────────
+                st.session_state.data = df_clean
+                new_shape = df_clean.shape
+
+                # ── result card ───────────────────────────────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                rows_removed   = original_shape[0] - new_shape[0]
+                cols_removed   = original_shape[1] - new_shape[1]
+                missing_after  = df_clean.isnull().sum().sum()
+
+                st.markdown(
+                    "<p style='color:#44dd88; font-family:Courier New; font-size:15px;"
+                    "font-weight:bold; letter-spacing:0.08em; margin-bottom:6px;'>"
+                    "✓ CLEANING COMPLETED</p>",
+                    unsafe_allow_html=True,
+                )
+
+                result_items = [
+                    ("Original Shape", f"{original_shape[0]} × {original_shape[1]}"),
+                    ("New Shape",      f"{new_shape[0]} × {new_shape[1]}"),
+                    ("Rows Removed",   rows_removed),
+                    ("Cols Removed",   cols_removed),
+                    ("Missing Values", missing_after),
+                ]
+
+                rows_html = ""
+                for label, value in result_items:
+                    color = "#ff6b6b" if (label in ("Missing Values",) and value > 0) else "#44dd88" if label in ("Original Shape","New Shape") else TEXT
+                    rows_html += (
+                        f"<tr>"
+                        f"<td style='padding:5px 16px; color:{TEXT}; font-family:Courier New; font-size:13px;'>{label}</td>"
+                        f"<td style='padding:5px 16px; color:{color}; font-family:Courier New; font-size:13px; font-weight:bold;'>: {value}</td>"
+                        f"</tr>"
+                    )
+
+                st.markdown(
+                    f"<table style='border:1px solid #1a3550; border-radius:6px;"
+                    f"background:#0a0e18; width:100%; border-collapse:collapse;'>"
+                    f"{rows_html}</table>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    "<div style='margin-top:12px; padding:8px 14px; border-radius:6px;"
+                    "border:1px solid #47aaff; background:#0a0e18;'>"
+                    "<p style='color:#47aaff; font-family:Courier New; font-size:12px; margin:0;'>"
+                    "💡 Head to the <b>Dataset</b> tab to reselect your features and run the model on the cleaned data."
+                    "</p></div>",
+                    unsafe_allow_html=True,
+                )
+
+
 
 
     with tab3:
         if selected_features and selected_target:
+
+            target_col = st.session_state.data["target"]
+            if target_col.nunique() <= 1:
+                st.markdown(
+                    "<div style='margin-top:10px; padding:10px 14px; border-radius:6px;"
+                    "border:1px solid #ff6b6b; background:#0a0e18;'>"
+                    "<p style='color:#ff6b6b; font-family:Courier New; font-size:13px; margin:0;'>"
+                    "⚠️ Target column has only 1 unique value after cleaning. "
+                    "The model cannot train on this. Go back to <b>Data Cleaning</b> and "
+                    "try a less aggressive cleaning strategy (e.g. avoid removing outliers "
+                    "on all columns, or use a different missing value strategy)."
+                    "</p></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
            
-            if(model_select=='Logistic Regression'):
-                classification_report,  y_pred_prob, y_test, y, y_pred= logistic_regression(st.session_state.data, selected_features, selected_target)
-                st.session_state.y_test = y_test 
-                st.session_state.y_pred_prob = y_pred_prob
-                st.session_state.y=y
-                st.session_state.y_pred =y_pred
-                classification_dataframe = pd.DataFrame(classification_report)
-                accuracy = classification_dataframe["accuracy"].unique()[0]
-                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
-                themed_dataframe(classification_dataframe)
-                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+                if(model_select=='Logistic Regression'):
+                    classification_report,  y_pred_prob, y_test, y, y_pred= logistic_regression(st.session_state.data, selected_features, selected_target)
+                    st.session_state.y_test = y_test 
+                    st.session_state.y_pred_prob = y_pred_prob
+                    st.session_state.y=y
+                    st.session_state.y_pred =y_pred
+                    classification_dataframe = pd.DataFrame(classification_report)
+                    accuracy = classification_dataframe["accuracy"].unique()[0]
+                    classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                    themed_dataframe(classification_dataframe)
+                    st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
 
-            if(model_select=='Random Forest'):
-                classification_report,  y_pred_prob, y_test, y, y_pred= random_forest_classifier(st.session_state.data, selected_features, selected_target)
-                st.session_state.y_test = y_test 
-                st.session_state.y_pred_prob = y_pred_prob
-                st.session_state.y=y
-                st.session_state.y_pred=y_pred
-                classification_dataframe = pd.DataFrame(classification_report)
-                accuracy = classification_dataframe["accuracy"].unique()[0]
-                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
-                themed_dataframe(classification_dataframe)
-                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+                if(model_select=='Random Forest'):
+                    classification_report,  y_pred_prob, y_test, y, y_pred= random_forest_classifier(st.session_state.data, selected_features, selected_target)
+                    st.session_state.y_test = y_test 
+                    st.session_state.y_pred_prob = y_pred_prob
+                    st.session_state.y=y
+                    st.session_state.y_pred=y_pred
+                    classification_dataframe = pd.DataFrame(classification_report)
+                    accuracy = classification_dataframe["accuracy"].unique()[0]
+                    classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                    themed_dataframe(classification_dataframe)
+                    st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
 
-            if(model_select=='Support Vector Machine'):
-                classification_report,  y_pred_prob, y_test, y, y_pred= support_vector_machine(st.session_state.data, selected_features, selected_target)
-                st.session_state.y_test = y_test 
-                st.session_state.y_pred_prob = y_pred_prob
-                st.session_state.y=y
-                st.session_state.y_pred=y_pred
-                classification_dataframe = pd.DataFrame(classification_report)
-                accuracy = classification_dataframe["accuracy"].unique()[0]
-                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
-                themed_dataframe(classification_dataframe)
-                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+                if(model_select=='Support Vector Machine'):
+                    classification_report,  y_pred_prob, y_test, y, y_pred= support_vector_machine(st.session_state.data, selected_features, selected_target)
+                    st.session_state.y_test = y_test 
+                    st.session_state.y_pred_prob = y_pred_prob
+                    st.session_state.y=y
+                    st.session_state.y_pred=y_pred
+                    classification_dataframe = pd.DataFrame(classification_report)
+                    accuracy = classification_dataframe["accuracy"].unique()[0]
+                    classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                    themed_dataframe(classification_dataframe)
+                    st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
 
-            if(model_select=='Naive Bayes'):
-                classification_report,  y_pred_prob, y_test, y, y_pred= naive_bayes(st.session_state.data, selected_features, selected_target)
-                st.session_state.y_test = y_test 
-                st.session_state.y_pred_prob = y_pred_prob
-                st.session_state.y=y
-                st.session_state.y_pred=y_pred
-                classification_dataframe = pd.DataFrame(classification_report)
-                accuracy = classification_dataframe["accuracy"].unique()[0]
-                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
-                themed_dataframe(classification_dataframe)
-                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
-            
-            if(model_select=='K-Nearest Neighbors'):
-                classification_report,  y_pred_prob, y_test, y, y_pred= k_neighbor(st.session_state.data, selected_features, selected_target)
-                st.session_state.y_test = y_test 
-                st.session_state.y_pred_prob = y_pred_prob
-                st.session_state.y=y
-                st.session_state.y_pred=y_pred
-                classification_dataframe = pd.DataFrame(classification_report)
-                accuracy = classification_dataframe["accuracy"].unique()[0]
-                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
-                themed_dataframe(classification_dataframe)
-                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
-
-            if(model_select=='Decision Tree'):
-                classification_report,  y_pred_prob, y_test, y, y_pred= dec_tree(st.session_state.data, selected_features, selected_target)
-                st.session_state.y_test = y_test 
-                st.session_state.y_pred_prob = y_pred_prob
-                st.session_state.y=y
-                st.session_state.y_pred=y_pred
-                classification_dataframe = pd.DataFrame(classification_report)
-                accuracy = classification_dataframe["accuracy"].unique()[0]
-                classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
-                themed_dataframe(classification_dataframe)
-                st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
-
-            if(model_select=='Linear Regression'):
-                metrics, pca_data= linear_regression(st.session_state.data, selected_features, selected_target)
-                st.session_state.pca_data = pca_data
-                themed_dataframe(metrics)
-
-
-            if(model_select=='Decision Tree Regression'):
-                metrics, pca_data= dec_tree_reg(st.session_state.data, selected_features, selected_target)
-                st.session_state.pca_data = pca_data
-                themed_dataframe(metrics)
-
-
-            if(model_select=='Random Forest Regression'):
-                metrics, pca_data= ran_for_reg(st.session_state.data, selected_features, selected_target)
-                st.session_state.pca_data = pca_data
-                themed_dataframe(metrics)
-
-
-            if(model_select=='Ridge Regression'):
-                metrics, pca_data= ridge_reg(st.session_state.data, selected_features, selected_target)
-                st.session_state.pca_data = pca_data
-                themed_dataframe(metrics)
-
-
-            if(model_select=='Lasso Regression'):
-                metrics, pca_data= lasso_reg(st.session_state.data, selected_features, selected_target)
-                st.session_state.pca_data = pca_data
-                themed_dataframe(metrics)
-
-
-            if(model_select=='Support Vector Regression'):
-                metrics, pca_data= svr(st.session_state.data, selected_features, selected_target)
-                st.session_state.pca_data = pca_data
-                themed_dataframe(metrics)
+                if(model_select=='Naive Bayes'):
+                    classification_report,  y_pred_prob, y_test, y, y_pred= naive_bayes(st.session_state.data, selected_features, selected_target)
+                    st.session_state.y_test = y_test 
+                    st.session_state.y_pred_prob = y_pred_prob
+                    st.session_state.y=y
+                    st.session_state.y_pred=y_pred
+                    classification_dataframe = pd.DataFrame(classification_report)
+                    accuracy = classification_dataframe["accuracy"].unique()[0]
+                    classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                    themed_dataframe(classification_dataframe)
+                    st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
                 
+                if(model_select=='K-Nearest Neighbors'):
+                    classification_report,  y_pred_prob, y_test, y, y_pred= k_neighbor(st.session_state.data, selected_features, selected_target)
+                    st.session_state.y_test = y_test 
+                    st.session_state.y_pred_prob = y_pred_prob
+                    st.session_state.y=y
+                    st.session_state.y_pred=y_pred
+                    classification_dataframe = pd.DataFrame(classification_report)
+                    accuracy = classification_dataframe["accuracy"].unique()[0]
+                    classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                    themed_dataframe(classification_dataframe)
+                    st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+                if(model_select=='Decision Tree'):
+                    classification_report,  y_pred_prob, y_test, y, y_pred= dec_tree(st.session_state.data, selected_features, selected_target)
+                    st.session_state.y_test = y_test 
+                    st.session_state.y_pred_prob = y_pred_prob
+                    st.session_state.y=y
+                    st.session_state.y_pred=y_pred
+                    classification_dataframe = pd.DataFrame(classification_report)
+                    accuracy = classification_dataframe["accuracy"].unique()[0]
+                    classification_dataframe.drop(labels=["accuracy"], axis=1, inplace=True)
+                    themed_dataframe(classification_dataframe)
+                    st.metric(label="Model accuracy", value=np.round(accuracy, decimals=2))
+
+                if(model_select=='Linear Regression'):
+                    metrics, pca_data= linear_regression(st.session_state.data, selected_features, selected_target)
+                    st.session_state.pca_data = pca_data
+                    themed_dataframe(metrics)
+
+
+                if(model_select=='Decision Tree Regression'):
+                    metrics, pca_data= dec_tree_reg(st.session_state.data, selected_features, selected_target)
+                    st.session_state.pca_data = pca_data
+                    themed_dataframe(metrics)
+
+
+                if(model_select=='Random Forest Regression'):
+                    metrics, pca_data= ran_for_reg(st.session_state.data, selected_features, selected_target)
+                    st.session_state.pca_data = pca_data
+                    themed_dataframe(metrics)
+
+
+                if(model_select=='Ridge Regression'):
+                    metrics, pca_data= ridge_reg(st.session_state.data, selected_features, selected_target)
+                    st.session_state.pca_data = pca_data
+                    themed_dataframe(metrics)
+
+
+                if(model_select=='Lasso Regression'):
+                    metrics, pca_data= lasso_reg(st.session_state.data, selected_features, selected_target)
+                    st.session_state.pca_data = pca_data
+                    themed_dataframe(metrics)
+
+
+                if(model_select=='Support Vector Regression'):
+                    metrics, pca_data= svr(st.session_state.data, selected_features, selected_target)
+                    st.session_state.pca_data = pca_data
+                    themed_dataframe(metrics)
+                    
             
     with tab4:
         if(select_method=='Classification'):
@@ -1143,39 +1661,51 @@ def show_main_platform():
                     col1, col2 = st.columns((2,2))
                     with col1:
                         with st.container(border=True, width="content", height="content"):
-                            classes=np.unique(st.session_state.y)
-                    
-                            y_test_binarized = label_binarize(
-                                st.session_state.y_test,
-                                classes=classes
-                            )
+                            y_pred_prob = np.array(st.session_state.y_pred_prob)
+                            if y_pred_prob.ndim == 1:
+                                y_pred_prob = np.column_stack([1 - y_pred_prob, y_pred_prob])
+
+                            classes   = np.unique(st.session_state.y)
                             n_classes = len(classes)
-                            cmap = plt.cm.get_cmap('tab10', n_classes)
-                            fig,ax=plt.subplots(figsize=(6,5), facecolor='#080810')
+                            cmap      = plt.cm.get_cmap('tab10', n_classes)
+                            fig, ax   = plt.subplots(figsize=(6,5), facecolor='#080810')
                             ax.set_facecolor('#080810')
-                            for class_index in range(len(np.unique(st.session_state.y))):
-                                y_pred_class = st.session_state.y_pred_prob[:, class_index]
-                                y_test_class=y_test_binarized[:,class_index]
-                                fpr,tpr,thresholds=roc_curve(y_true=y_test_class, y_score=y_pred_class)
-                                auc_score=roc_auc_score(y_true=y_test_class,y_score=y_pred_class)
-                                ax.plot(fpr,tpr, label=f"AUC={auc_score:.2f}",color=cmap(class_index), linewidth=2.5)
-                                ax.plot([0,1],[0,1], "--", color="#4a6a8a", label="random", linewidth=1.5)
-                                ax.set_xlabel("False Positive Rate", fontsize=11, color='#b4d4f0', fontweight='bold')
-                                ax.set_ylabel("True Positive Rate", fontsize=11, color='#b4d4f0', fontweight='bold')
-                                ax.set_title("ROC Curve", fontsize=13, color='#b4d4f0', fontweight='bold')
-                                ax.tick_params(labelsize=10, colors='#b4d4f0')
 
-                                ax.xaxis.label.set_color('#b4d4f0')
-                                ax.yaxis.label.set_color('#b4d4f0')
-                                ax.title.set_color('#b4d4f0')
+                            if n_classes == 2:
+                                fpr, tpr, _ = roc_curve(
+                                    y_true=st.session_state.y_test,
+                                    y_score=y_pred_prob[:, 1],
+                                    pos_label=classes[1]
+                                )
+                                auc_score = roc_auc_score(
+                                    y_true=st.session_state.y_test,
+                                    y_score=y_pred_prob[:, 1]
+                                )
+                                ax.plot(fpr, tpr, label=f"AUC={auc_score:.2f}", color=cmap(0), linewidth=2.5)
+                            else:
+                                y_test_binarized = label_binarize(st.session_state.y_test, classes=classes)
+                                for class_index in range(n_classes):
+                                    y_pred_class = y_pred_prob[:, class_index]
+                                    y_test_class = y_test_binarized[:, class_index]
+                                    fpr, tpr, _ = roc_curve(y_true=y_test_class, y_score=y_pred_class)
+                                    auc_score   = roc_auc_score(y_true=y_test_class, y_score=y_pred_class)
+                                    ax.plot(fpr, tpr, label=f"AUC={auc_score:.2f}", color=cmap(class_index), linewidth=2.5)
 
-                                for spine in ax.spines.values():
-                                    spine.set_edgecolor('#1a3550')
-                                    spine.set_linewidth(1.2)
-
-                                ax.grid(color='#1a3550', linestyle='--', linewidth=0.7, alpha=0.6)
-                                ax.legend(fontsize=10, facecolor='#0d1520', edgecolor='#47aaff', labelcolor='#b4d4f0', loc='lower right', framealpha=0.95)
-                                plt.tight_layout()
+                            # axes styling — outside any loop
+                            ax.plot([0,1],[0,1], "--", color="#4a6a8a", label="random", linewidth=1.5)
+                            ax.set_xlabel("False Positive Rate", fontsize=11, color='#b4d4f0', fontweight='bold')
+                            ax.set_ylabel("True Positive Rate",  fontsize=11, color='#b4d4f0', fontweight='bold')
+                            ax.set_title("ROC Curve", fontsize=13, color='#b4d4f0', fontweight='bold')
+                            ax.tick_params(labelsize=10, colors='#b4d4f0')
+                            ax.xaxis.label.set_color('#b4d4f0')
+                            ax.yaxis.label.set_color('#b4d4f0')
+                            ax.title.set_color('#b4d4f0')
+                            for spine in ax.spines.values():
+                                spine.set_edgecolor('#1a3550')
+                                spine.set_linewidth(1.2)
+                            ax.grid(color='#1a3550', linestyle='--', linewidth=0.7, alpha=0.6)
+                            ax.legend(fontsize=10, facecolor='#0d1520', edgecolor='#47aaff', labelcolor='#b4d4f0', loc='lower right', framealpha=0.95)
+                            plt.tight_layout()
                             st.pyplot(fig, use_container_width=False)
 
                     with col2:
