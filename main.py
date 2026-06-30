@@ -27,6 +27,12 @@ from sklearn.preprocessing import label_binarize
 import os
 import math 
 
+if "login_error" not in st.session_state:
+    st.session_state.login_error = False
+
+if "user_name" not in st.session_state:
+    st.session_state.user_name = None
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
@@ -74,11 +80,21 @@ def _detect_task(df: pd.DataFrame) -> str:
 
 from upstash_redis import Redis
 
+
+
 def get_redis():
     return Redis(
         url=st.secrets["UPSTASH_REDIS_REST_URL"],
         token=st.secrets["UPSTASH_REDIS_REST_TOKEN"],
     )
+
+def check_login(user_id: str):
+    try:
+        r = get_redis()
+        name = r.get(f"USER:{user_id.strip().upper()}")
+        return name if name else None
+    except Exception:
+        return None
 
 def increment_visitor_count():
     r = get_redis()
@@ -109,76 +125,157 @@ def ordinal(n):
 def welcome_page():
     st.set_page_config(page_title="WizML", layout="centered")
 
-    
     st.markdown("""
     <style>
         #MainMenu, footer, header { visibility: hidden; }
         [data-testid="stSidebarCollapsedControl"] { visibility: visible !important; }
-        
+        .stApp { background: #000000 !important; }
+        .stMainBlockContainer { background: #000000 !important; }
+        [data-testid="stAppViewContainer"] { background: #000000 !important; }
+        [data-testid="stAppViewBlockContainer"] { background: #000000 !important; }
+        section.main { background: #000000 !important; }
+        .main .block-container { background: #000000 !important; }
                 
-        .stApp { background: #080810; }
-        /* old theme */
-        /* .stApp { background: #000000; } */
-        .block-container { padding: 0 !important; max-width: 100% !important; }
+        .block-container { padding: 0 !important; max-width: 100% !important; margin-top: 0 !important; }
+        .stMainBlockContainer { padding-top: 0 !important; padding-bottom: 0 !important; }
+        [data-testid="stVerticalBlock"] { gap: 0 !important; }
+        [data-testid="stVerticalBlockBorderWrapper"] { gap: 0 !important; }
         iframe { background: transparent !important; border: none !important; }
-        /* Hide visually but keep clickable in DOM */
-        div[data-testid="stButton"] {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            overflow: hidden;
-            opacity: 0;
-            pointer-events: none;
+                
+        .mui-wrapper [data-testid="stTextInput"] {
+            position: relative !important;
+            opacity: 1 !important;
+            height: auto !important;
+            width: 100% !important;
+            pointer-events: auto !important;
+            overflow: visible !important;
         }
+        .mui-wrapper [data-testid="stTextInput"] label {
+            position: absolute !important;
+            left: 13px !important;
+            top: 17px !important;
+            color: #9aa0a6 !important;
+            background: transparent !important;
+            font-family: Roboto, sans-serif !important;
+            font-size: 15px !important;
+            z-index: 2 !important;
+            pointer-events: none !important;
+            transition: all 0.15s ease !important;
+            padding: 0 4px !important;
+            margin: 0 !important;
+        }
+        .mui-wrapper [data-testid="stTextInput"] input {
+            background: #0d1520 !important;
+            color: #b4d4f0 !important;
+            border: 1.5px solid #1a3550 !important;
+            border-radius: 6px !important;
+            font-family: Roboto, sans-serif !important;
+            font-size: 15px !important;
+            padding: 18px 13px 4px 13px !important;
+            height: 52px !important;
+        }
+        .mui-wrapper [data-testid="stTextInput"] input:focus {
+            border: 2px solid #47aaff !important;
+        }
+        .mui-wrapper [data-testid="stTextInput"] input:focus ~ label,
+        .mui-wrapper [data-testid="stTextInput"] input:not(:placeholder-shown) ~ label {
+            top: -9px !important;
+            left: 9px !important;
+            font-size: 11.5px !important;
+            background: #080810 !important;
+        }
+        .mui-wrapper [data-testid="stTextInput"] input:focus ~ label {
+            color: #47aaff !important;
+        }
+                
+        
         
     </style>
     """, unsafe_allow_html=True)
-    # Force black background, hide Streamlit chrome
-    # st.markdown("""
-    # <style>
-    #     #MainMenu, footer, header { visibility: hidden; }
-    #     .stApp { background: #000000; }
-    #     .block-container { padding: 0 !important; max-width: 100% !important; }
-    # </style>
-    # """, unsafe_allow_html=True)
 
+    st.markdown("""
+    <script>
+    function hideTriggerBtn() {
+        const btns = window.parent.document.querySelectorAll('button');
+        btns.forEach(btn => {
+            if (btn.innerText.trim() === '__typewriter_trigger__') {
+                btn.parentElement.parentElement.style.display = 'none';
+            }
+        });
+    }
+    // try immediately and after short delay
+    hideTriggerBtn();
+    setTimeout(hideTriggerBtn, 500);
+    setTimeout(hideTriggerBtn, 1500);
+    </script>
+    """, unsafe_allow_html=True)
 
-
-    # Listen for postMessage from the HTML iframe
     st.markdown("""
     <script>
     window.addEventListener('message', function(e) {
         if (e.data && e.data.type === 'enter_platform') {
             window.top.location.href = window.top.location.pathname + '?enter=true';
         }
+        if (e.data && e.data.type === 'typewriter_done') {
+            // click hidden trigger button
+            const btns = window.parent.document.querySelectorAll('button');
+            btns.forEach(btn => {
+                if (btn.innerText.includes('__typewriter_trigger__')) btn.click();
+            });
+        }
     });
     </script>
     """, unsafe_allow_html=True)
 
-    if st.button("Enter Platform", key="enter_btn"):
-        increment_visitor_count()
-        st.session_state.logged_in = True
-        st.rerun()
-
-    
     BASE_DIR = os.path.dirname(__file__)
     html_path = os.path.join(BASE_DIR, "html_pages/wlcm.html")
-    count = get_visitor_count()+1
-    visitor_text = f"👾 you are the <b>{ordinal(count)}</b> visitor"
 
     with open(html_path, "r") as f:
         html_content = f.read()
 
-    # inject visitor text into the HTML before the closing body tag
-    html_content = html_content.replace(
-        "</body>",
-        f"""<p style='text-align:center; color:#47aaff; font-family:Courier New;
-            font-size:13px; letter-spacing:0.08em; margin-top:8px;'>
-            {visitor_text}</p>
-        </body>"""
-    )
+    components.html(html_content, height=380, scrolling=False)
 
-    components.html(html_content, height=600, scrolling=False)
+
+    col1, col2, col3 = st.columns([3, 2, 3])
+    with col2:
+        
+
+        st.markdown('<div class="mui-wrapper">', unsafe_allow_html=True)
+        user_id_input = st.text_input(
+            "ID / Email / Phone",
+            key="user_id_input",
+            placeholder=" ",
+            label_visibility="visible",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div style="margin-bottom:25px;"></div>', unsafe_allow_html=True)
+       
+        
+        if st.button("Enter Platform", key="enter_btn", use_container_width=True):
+            name = check_login(user_id_input)
+            if name:
+                increment_visitor_count()
+                st.session_state.logged_in = True
+                st.session_state.user_name = name
+                st.session_state.login_error = False
+                st.rerun()
+            else:
+                st.session_state.login_error = True
+                st.rerun()
+
+        if st.session_state.login_error:
+            st.markdown(
+                "<p style='text-align:center; color:#ff6b6b; font-family:Courier New;"
+                "font-size:12px; margin:8px 0 0 0;'>⚠️ Invalid User ID.</p>",
+                unsafe_allow_html=True,
+            )
+
+        count = get_visitor_count() + 1
+        st.markdown(
+            f"<p style='text-align:center; color:#47aaff; font-family:Courier New;"
+            f"font-size:11px; margin-top:14px;'>👾 you are the <b>{ordinal(count)}</b> visitor</p>",
+            unsafe_allow_html=True,
+        )
     
 
 def show_main_platform():
@@ -363,7 +460,15 @@ def show_main_platform():
 
     #==================================================
 
-    
+    if st.session_state.user_name:
+        st.sidebar.markdown(
+            f"<div style='padding:6px 10px; margin-bottom:8px; border-radius:6px;"
+            f"border:1px solid #1a3550; background:#0a0e18;'>"
+            f"<p style='color:#47aaff; font-family:Courier New; font-size:12px; margin:0;'>"
+            f"👤 &nbsp;<b>{st.session_state.user_name}</b></p>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )    
 
     # ── derive flags ──────────────────────────────────────────────────────────
     has_upload = st.session_state.uploaded_df is not None

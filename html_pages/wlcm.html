@@ -13,7 +13,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
+    min-height: 100%;
     font-family: 'Courier New', monospace;
     overflow: hidden;
   }
@@ -24,6 +24,7 @@
     align-items: center;
     justify-content: center;
     gap: 48px;
+    padding-top: 180px;
   }
  
   /* ── Pixel canvas for WizML assembly ── */
@@ -397,8 +398,22 @@ requestAnimationFrame(animateAssembly);
 // ─────────────────────────────────────────────
 // 2. TYPEWRITER with SPARKS
 // ─────────────────────────────────────────────
-const MESSAGE = "I solemly swear I am upto no good";
-const CHAR_DELAY = 60;    // ms per character
+const MESSAGES = [
+    "every pattern has a story",
+    "you were chosen by the algorithm",
+    "the model is always watching",
+    "bias is the enemy, variance is the villain",
+    "the algorithm has been expecting you",
+    "enter if you know the spell",
+    "knowledge is the only magic",
+    "the algorithm never sleeps",
+    "behind every prediction is a pattern",
+    "the oracle is ready",
+    "the numbers know something you don't",
+    "the future is predictable if you know to look",
+];
+const MESSAGE = MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
+const CHAR_DELAY = 40;    // ms per character
  
 const taglineEl = document.getElementById('tagline-text');
 const cursorEl  = document.getElementById('cursor');
@@ -446,9 +461,9 @@ function startTypewriter() {
       setTimeout(() => {
         cursorEl.style.animation = 'none';
         cursorEl.style.opacity = '0';
-        enterBtn.style.display = 'inline-block';
-        enterBtn.style.animation = 'fadeIn 0.6s ease forwards';
+        enterBtn.style.display = 'none';
       }, 600);
+      window.parent.postMessage({type: 'typewriter_done'}, '*');
     }
   }
  
